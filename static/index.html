@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>recall-forge &mdash; spaced-repetition flashcard builder</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>recall-forge</h1>
+  <span class="tag">paste notes &rarr; atomic flashcards &rarr; an SM-2 review schedule you can actually keep</span>
+  <span class="spacer"></span>
+  <span class="pill">local-first</span>
+  <span class="pill">no API keys</span>
+  <span class="pill">no LLM</span>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Source</h2>
+    <textarea id="source" rows="16" placeholder="Paste notes, a textbook section, an article, lecture notes, or a syllabus topic.&#10;&#10;One fact per line works best. Bullets and paragraphs both work."></textarea>
+    <button class="ghost" id="loadSample">Load sample source</button>
+
+    <h2 style="margin-top:22px">Deck config</h2>
+    <label for="intent">What is this deck for?</label>
+    <select id="intent">
+      <option value="retention">Long-term retention (default)</option>
+      <option value="exam">Exam prep under time pressure</option>
+      <option value="professional">Professional / on-the-job recall</option>
+      <option value="language">Language &amp; vocabulary</option>
+    </select>
+
+    <label>Card style mix (%)</label>
+    <div class="mix">
+      <div><label for="mQa">Q&amp;A</label><input id="mQa" type="number" min="0" max="100" value="40"></div>
+      <div><label for="mCloze">Cloze</label><input id="mCloze" type="number" min="0" max="100" value="25"></div>
+      <div><label for="mDef">Definition</label><input id="mDef" type="number" min="0" max="100" value="20"></div>
+      <div><label for="mWhy">Why</label><input id="mWhy" type="number" min="0" max="100" value="15"></div>
+    </div>
+
+    <div class="two">
+      <div><label for="maxCards">Max cards</label><input id="maxCards" type="number" min="1" max="200" value="24"></div>
+      <div><label for="horizon">Horizon (days)</label><input id="horizon" type="number" min="7" max="365" value="45"></div>
+    </div>
+    <div class="two">
+      <div><label for="cap">New cards / day</label><input id="cap" type="number" min="1" max="200" value="12"></div>
+      <div><label for="ctxFilter">Context</label><input id="ctxFilter" type="submit" placeholder="e.g. med school exam"></div>
+    </div>
+    <p class="note">Context is optional. It shifts which card style gets picked for borderline lines &mdash; it is recorded with the session, not sent anywhere.</p>
+
+    <button id="build">Build deck</button>
+  </section>
+
+  <section>
+    <div id="empty" class="panel empty">
+      Nothing built yet.<br><br>
+      Paste source notes on the left and hit <b>Build deck</b>, or load the sample to see the engine work.
+    </div>
+
+    <div id="result" class="hidden">
+      <div class="panel" style="margin-bottom:16px">
+        <div class="score-head">
+          <div>
+            <div class="score-num" id="scoreNum">&ndash;</div>
+            <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em">deck score</div>
+          </div>
+          <div>
+            <span class="badge" id="verdict">&ndash;</span>
+            <div id="blurb" style="color:var(--muted);margin-top:8px;max-width:520px"></div>
+          </div>
+          <div class="spacer" style="flex:1"></div>
+          <div class="stats" style="margin:0" id="statChips"></div>
+        </div>
+        <div class="axes" id="axes"></div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:12.5px">
+          <span>SM-2 ladder: <b style="color:var(--text)" id="ladder"></b></span>
+          <span>All new cards introduced by: <b style="color:var(--text)" id="completion"></b></span>
+          <span>Peak day load: <b style="color:var(--text)" id="peak"></b></span>
+          <span>First 14 days &asymp; <b style="color:var(--text)" id="mins"></b> min</span>
+        </div>
+        <div class="exports">
+          <a id="expTsv" href="#">Download Anki TSV</a>
+          <a id="expCsv" href="#">Download CSV</a>
+          <a id="expMd" href="#">Markdown report</a>
+          <a id="expJson" href="#">JSON</a>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <span style="color:var(--muted);font-size:12px">How usable was this deck?</span>
+          <div class="stars" id="stars"></div>
+          <input id="notes" placeholder="notes (optional)" style="flex:1;min-width:200px">
+          <button class="linkbtn" id="saveRating">save</button>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2>14-day review load</h2>
+        <div class="schedule" id="schedule"></div>
+        <div style="display:flex;gap:18px;color:var(--muted);font-size:11.5px">
+          <span><span style="color:var(--blue)">&#9644;</span> within daily new cap</span>
+          <span><span style="color:var(--red)">&#9644;</span> more than 2x cap &mdash; consider lowering new cards/day</span>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2>Top fixes before you start</h2>
+        <ul class="scaffold" id="topFixes" style="padding-left:18px;margin:0"></ul>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2>Cards <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-weight:400" id="cardCount"></span></h2>
+        <div id="cards"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2>Findings</h2>
+        <div class="filters" id="filters">
+          <span class="fchip on" data-f="all">all</span>
+          <span class="fchip" data-f="high">high</span>
+          <span class="fchip" data-f="medium">medium</span>
+          <span class="fchip" data-f="low">low</span>
+          <span class="fchip" data-f="source">source-level</span>
+          <span class="fchip" data-f="card">card-level</span>
+        </div>
+        <div id="findings"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <h2>Rewrite scaffold</h2>
+        <div class="scaffold" id="scaffold"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Replay history</h2>
+        <div id="history"><div style="color:var(--muted);font-size:13px">loading&hellip;</div></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
